@@ -1,11 +1,21 @@
 import axios from "axios";
 import { inngest } from "./client";
 import { createClient } from "@deepgram/sdk";
-import {GenerateImageScript} from "../configs/AIModel"
+import { GenerateImageScript } from "../configs/AIModel";
 import { ConvexHttpClient } from "convex/browser";
 import { api } from "@/convex/_generated/api";
+import * as admin from "firebase-admin";
 
-const ImagePromptScript=`
+// Initialize Firebase Admin if not already initialized
+if (!admin.apps.length) {
+  admin.initializeApp({
+    credential: admin.credential.applicationDefault(),
+    storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
+  });
+}
+const bucket = admin.storage().bucket();
+
+const ImagePromptScript = `
 Generate Image prompt of {style} style with all details for each scene for 30 seconds video: script : {script} 
 - No need of intro to response directly generate.
 - Just Give specifing image prompt depending on the story line
@@ -17,126 +27,95 @@ Generate Image prompt of {style} style with all details for each scene for 30 se
       sceneContent:'<Script Content>'
     }
 ]
-`
+`;
 
-export const helloWorld = inngest.createFunction(
-  { id: "hello-world" },
-  { event: "test/hello.world" },
-  async ({ event, step }) => {
-    await step.sleep("wait-a-moment", "1s");
-    return { message: `Hello ${event.data.email}!` };
-  },
-);
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
-
-const BASE_URL = 'https://aigurulab.tech';
 export const GenerateVideoData = inngest.createFunction(
-  { id: 'generate-video-data' },
-  { event: 'generate-video-data' },
+  { id: "generate-video-data" },
+  { event: "generate-video-data" },
   async ({ event, step }) => {
-    const { script, topic, title, caption, videoStyle, voice, recordId } = event?.data
-    const convex = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL)
-    // Generate audio mp3
-    const GenerateAudioFile = await step.run(
-      "GenerateAudioFile",
-      async () => {
-        const result = await axios.post(BASE_URL + '/api/text-to-speech',
-          {
-            input: script,
-            voice: voice
-          },
+    const { script, topic, title, caption, videoStyle, voice, recordId, audioUrl } = event?.data;
+    const convex = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL);
+
+    // Instead of generating audio, we already have the audio URL from the frontend
+    const GenerateAudioFile = audioUrl;
+
+    // --- Generate captions using Deepgram ---
+    const GenerateCaptions = await step.run("generatedCaptions", async () => {
+      const deepgram = createClient(process.env.NEXT_PUBLIC_DEEPGRAM_API_KEY);
+      const { result } = await deepgram.listen.prerecorded.transcribeUrl(
+        { url: GenerateAudioFile },
+        { model: "nova-3" }
+      );
+      return result?.results?.channels[0]?.alternatives[0]?.words;
+    });
+
+    // --- Generate image prompts from script ---
+    const GenerateImagePrompts = await step.run("generateImagePrompt", async () => {
+      const FINAL_PROMPT = ImagePromptScript
+        .replace("{style}", videoStyle)
+        .replace("{script}", script);
+      const result = await GenerateImageScript.sendMessage(FINAL_PROMPT);
+      const resp = JSON.parse(result.response.text());
+      return resp;
+    });
+
+    async function fetchImage(imagePrompt, retryCount = 0) {
+      const maxRetries = 5;
+      try {
+        const response = await axios.post(
+          "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-xl-base-1.0",
+          { inputs: imagePrompt },
           {
             headers: {
-              'x-api-key': process.env.NEXT_PUBLIC_AI_GURU_API_KEY,
-              'Content-Type': 'application/json',
+              Authorization: `Bearer ${process.env.NEXT_PUBLIC_HF_API_KEY}`,
+              "Content-Type": "application/json",
             },
-          })
-        console.log(result?.data?.audio)
-        return result.data.audio;
-        // return "https://firebasestorage.googleapis.com/v0/b/projects-2025-71366.firebasestorage.app/o/audio%2F1739867396580.mp3?alt=media&token=23afe5e9-e651-40cc-9d33-49dbc8ca5469";
-      }
-    )
-
-    // generate captions
-    const GenerateCaptions=await step.run(
-      "generatedCaptions",
-      async()=>{
-        const deepgram = createClient(process.env.NEXT_PUBLIC_DEEPGRAM_API_KEY);    
-
-        const { result, error } = await deepgram.listen.prerecorded.transcribeUrl(
-          {
-            url: GenerateAudioFile,
-          },
-          {
-            model: "nova-3"
+            responseType: "arraybuffer",
           }
         );
-
-        return result?.results?.channels[0]?.alternatives[0]?.words
+        return response.data;
+      } catch (error) {
+        if (error.response && error.response.status === 429 && retryCount < maxRetries) {
+          // Calculate exponential backoff delay (e.g., 5, 10, 20, 40... seconds)
+          const delayMs = 5000 * Math.pow(2, retryCount);
+          console.warn(`Rate limited. Retrying in ${delayMs / 1000} seconds...`);
+          await delay(delayMs);
+          return fetchImage(imagePrompt, retryCount + 1);
+        } else {
+          throw error;
+        }
       }
-    )
-    // generate image prompt from script
-    const GenerateImagePrompts=await step.run(
-      "generateImagePrompt",
-      async()=>{
-        const FINAL_PROMPT = ImagePromptScript
-        .replace('{style}', videoStyle)
-        .replace('{script}',script)
-        const result = await GenerateImageScript.sendMessage(FINAL_PROMPT)
+    }
 
-        const resp = JSON.parse(result.response.text())
-
-        return resp;
+    const GenerateImages = await step.run("generateImages", async () => {
+      const images = [];
+      for (const element of GenerateImagePrompts) {
+        const imageData = await fetchImage(element?.imagePrompt);
+        const buffer = Buffer.from(imageData, "binary");
+        const base64Image = buffer.toString("base64");
+        images.push(`data:image/png;base64,${base64Image}`);
+        // Optional: a small delay between requests to be safe
+        await delay(1000);
       }
-    )
-
-    // generate images using ai
-    const GenerateImages = await step.run(
-      "generateImages",
-      async()=>{
-        let images=[];
-        images = await Promise.all(
-          GenerateImagePrompts.map(async(element)=>{
-            const result = await axios.post(BASE_URL + '/api/generate-image',
-          {
-            width:1024,
-            height:1024,
-            input:element?.imagePrompt,
-            model:'sdxl',
-            aspectRatio:"1:1"
-          },
-          {
-            headers: {
-              'x-api-key': process.env.NEXT_PUBLIC_AI_GURU_API_KEY,
-              'Content-Type': 'application/json',
-            },
-          })
-        // console.log(result?.data?.image)
-        return result.data.image;
-          })
-        )
-        return images
-      }
-    )
-    // save all data to db
-
-    const UpdateDB=await step.run(
-      'UpdateDB',
-      async()=>{
-        const result = await convex.mutation(api.videoData.UpdateVideoRecord,{
-          recordId: recordId,
-          audioUrl:GenerateAudioFile,
-          captionJson:GenerateCaptions,
-          images:GenerateImages
-        })
-
-        return result
-      }
-    )
+      return images;
+    });
 
 
-    // return GenerateAudioFile, GenerateCaptions, GenerateImagePrompts, GenerateImages, UpdateDB
-    // return UpdateDB
-    return 'Executed Successfully!'
+    // --- Save all generated data to the database ---
+    const UpdateDB = await step.run("UpdateDB", async () => {
+      const result = await convex.mutation(api.videoData.UpdateVideoRecord, {
+        recordId: recordId,
+        audioUrl: GenerateAudioFile,
+        captionJson: GenerateCaptions,
+        images: GenerateImages,
+      });
+      return result;
+    });
+
+    return "Executed Successfully!";
   }
-)
+);
