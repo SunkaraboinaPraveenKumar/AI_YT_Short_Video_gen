@@ -53,7 +53,6 @@ export const GenerateVideoData = inngest.createFunction(
           })
         console.log(result?.data?.audio)
         return result.data.audio;
-        // return "https://firebasestorage.googleapis.com/v0/b/projects-2025-71366.firebasestorage.app/o/audio%2F1739867396580.mp3?alt=media&token=23afe5e9-e651-40cc-9d33-49dbc8ca5469";
       }
     )
 
