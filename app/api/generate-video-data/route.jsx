@@ -1,6 +1,8 @@
 import { inngest } from "@/inngest/client"
 import { NextResponse } from "next/server";
 
+export const maxDuration = 30;
+
 export async function POST(req) {
     try {
         const {script, videoStyle, voice,recordId, audioUrl} = await req.json();

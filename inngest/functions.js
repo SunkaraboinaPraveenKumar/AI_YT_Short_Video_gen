@@ -63,7 +63,7 @@ export const GenerateVideoData = inngest.createFunction(
       const maxRetries = 5;
       try {
         const response = await axios.post(
-          "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-xl-base-1.0",
+          "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-3.5-large",
           { inputs: imagePrompt },
           {
             headers: {
