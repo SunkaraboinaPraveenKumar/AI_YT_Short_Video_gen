@@ -74,13 +74,13 @@ function CreateNewVideo() {
     });
 
     try {
-      // Trigger video generation (Inngest will process this asynchronously)
       await axios.post("/api/generate-video-data", {
-        ...formData,
+        script:formData?.script,
+        videoStyle:formData?.videoStyle,
+        voice: formData?.voice,
         recordId,
         audioUrl: audioURL,
       });
-      // Redirect to dashboard immediately after sending the request
       router.replace("/dashboard");
     } catch (error) {
       console.error("Error generating video:", error);

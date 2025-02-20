@@ -20,7 +20,7 @@ export async function POST(req) {
         }
         `;
 
-    console.log(SCRIPT_PROMPT);
+    // console.log(SCRIPT_PROMPT);
 
     const result = await generateScript.sendMessage(SCRIPT_PROMPT);
 
