@@ -69,7 +69,9 @@ function AppSidebar() {
                         <Gem />
                         <h2>{user?.credits} Credits Left</h2>
                     </div>
-                    <Button className='w-full mt-3'>Buy More Credits</Button>
+                    <Link href={'/billing'}>
+                        <Button className='w-full mt-3'>Buy More Credits</Button>
+                    </Link>
                 </div>
             </SidebarFooter>
         </Sidebar>

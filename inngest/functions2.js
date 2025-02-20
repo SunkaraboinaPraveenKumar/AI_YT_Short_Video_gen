@@ -19,6 +19,14 @@ Generate Image prompt of {style} style with all details for each scene for 30 se
 ]
 `
 
+export const helloWorld = inngest.createFunction(
+  { id: "hello-world" },
+  { event: "test/hello.world" },
+  async ({ event, step }) => {
+    await step.sleep("wait-a-moment", "1s");
+    return { message: `Hello ${event.data.email}!` };
+  },
+);
 
 
 const BASE_URL = 'https://aigurulab.tech';
@@ -26,27 +34,27 @@ export const GenerateVideoData = inngest.createFunction(
   { id: 'generate-video-data' },
   { event: 'generate-video-data' },
   async ({ event, step }) => {
-    const { script, topic, title, caption, videoStyle, voice, recordId, audioUrl } = event?.data
+    const { script, topic, title, caption, videoStyle, voice, recordId } = event?.data
     const convex = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL)
     // Generate audio mp3
-    // const GenerateAudioFile = await step.run(
-    //   "GenerateAudioFile",
-    //   async () => {
-    //     const result = await axios.post(BASE_URL + '/api/text-to-speech',
-    //       {
-    //         input: script,
-    //         voice: voice
-    //       },
-    //       {
-    //         headers: {
-    //           'x-api-key': process.env.NEXT_PUBLIC_AI_GURU_API_KEY,
-    //           'Content-Type': 'application/json',
-    //         },
-    //       })
-    //     console.log(result?.data?.audio)
-    //     return result.data.audio;
-    //   }
-    // )
+    const GenerateAudioFile = await step.run(
+      "GenerateAudioFile",
+      async () => {
+        const result = await axios.post(BASE_URL + '/api/text-to-speech',
+          {
+            input: script,
+            voice: voice
+          },
+          {
+            headers: {
+              'x-api-key': process.env.NEXT_PUBLIC_AI_GURU_API_KEY,
+              'Content-Type': 'application/json',
+            },
+          })
+        console.log(result?.data?.audio)
+        return result.data.audio;
+      }
+    )
 
     // generate captions
     const GenerateCaptions=await step.run(
@@ -56,13 +64,13 @@ export const GenerateVideoData = inngest.createFunction(
 
         const { result, error } = await deepgram.listen.prerecorded.transcribeUrl(
           {
-            url: audioUrl,
+            url: GenerateAudioFile,
           },
           {
             model: "nova-3"
           }
         );
-        console.log(result?.results?.channels[0]?.alternatives[0]?.words);
+
         return result?.results?.channels[0]?.alternatives[0]?.words
       }
     )
@@ -116,7 +124,7 @@ export const GenerateVideoData = inngest.createFunction(
       async()=>{
         const result = await convex.mutation(api.videoData.UpdateVideoRecord,{
           recordId: recordId,
-          audioUrl:audioUrl,
+          audioUrl:GenerateAudioFile,
           captionJson:GenerateCaptions,
           images:GenerateImages
         })
